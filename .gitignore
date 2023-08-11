@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 llama-2-*
+checkpoints/
 _
 _pycache__/
 *.py[cod]

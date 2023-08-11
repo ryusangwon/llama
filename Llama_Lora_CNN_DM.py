@@ -76,13 +76,16 @@ def main():
     training_args = TrainingArguments(
         output_dir=output_dir,
         overwrite_output_dir=True,
-        num_train_epochs=3,
+        num_train_epochs=1,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
         bf16=True,  # Use BF16 if available
         # logging strategies
         logging_dir=f"{output_dir}/logs",
         logging_strategy="steps",
         logging_steps=10,
-        save_strategy="no",
+        save_strategy="steps",
+        save_steps=500,
         optim="adamw_torch_fused",
     )
 
