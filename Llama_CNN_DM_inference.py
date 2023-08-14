@@ -33,10 +33,10 @@ def main():
     test_sampled = dataset["test"]
 
     # tokenizer.pad_token = tokenizer.eos_token
-
+    prompt = '\nSummarize this article:\n'
     full_text_sampled = []
     for i in test_sampled['article']:
-        full_text_sampled.append(i + '\nSummarize this article:\n')
+        full_text_sampled.append(i + prompt)
     print('make full data')
     article_sampled = Dataset.from_pandas(pd.DataFrame(data=full_text_sampled, columns=['article']))
         
@@ -50,13 +50,13 @@ def main():
     input_ids_sampled = tokenized_article_sampled.with_format('torch')['input_ids']
     attention_mask_sampled = tokenized_article_sampled.with_format('torch')['attention_mask']
 
-    
+    print('start make summaries..')
     summaries = []
     for i in range(len(tokenized_article_sampled)):
         with torch.no_grad():
-            output = model.generate(input_ids=input_ids_sampled[i].to(device), attention_mask=attention_mask_sampled[i].to(device), max_length=2048, pad_token_id=tokenizer.eos_token_id, repetition_penalty=1.2, length_penalty=2)
+            output = model.generate(input_ids=input_ids_sampled[i].to(device), attention_mask=attention_mask_sampled[i].to(device), max_new_tokens=2048, pad_token_id=tokenizer.eos_token_id, repetition_penalty=1.2, length_penalty=2)
             predictions_all = tokenizer.decode(output[0], skip_special_tokens=True)
-            predictions = predictions_all.split('Summarize this article:\n')[1]
+            predictions = predictions_all.split(prompt)[1]
             print(f'{i}th summary:')
             print(predictions_all)
             print('\n')
