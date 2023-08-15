@@ -29,11 +29,11 @@ def main():
         }
     )
 
-    # test_sampled = dataset["test"].shuffle(seed=42).select(range(1000))
+    test_sampled = dataset["test"].shuffle(seed=42).select(range(1000))
     test_sampled = dataset["test"]
 
     # tokenizer.pad_token = tokenizer.eos_token
-    prompt = '\nSummarize this article:\n'
+    prompt = '\nSummarize the above article:\n'
     full_text_sampled = []
     for i in test_sampled['article']:
         full_text_sampled.append(i + prompt)
