@@ -29,11 +29,11 @@ def main():
         }
     )
 
-    # test_sampled = dataset["test"].shuffle(seed=42).select(range(1000))
-    test_sampled = dataset["test"]
+    test_sampled = dataset["test"].shuffle(seed=42).select(range(10))
+    # test_sampled = dataset["test"]
 
     # tokenizer.pad_token = tokenizer.eos_token
-    prompt = '\nSummarize this article:\n'
+    prompt = '\nSummarize the above article:\n'
     full_text_sampled = []
     for i in test_sampled['article']:
         full_text_sampled.append(i + prompt)
@@ -58,17 +58,17 @@ def main():
             predictions_all = tokenizer.decode(output[0], skip_special_tokens=True)
             predictions = predictions_all.split(prompt)[1]
             print(f'{i}th summary:')
-            print(predictions_all)
+            print(predictions)
             print('\n')
             summaries.append(predictions)
     print(f"길이 {len(summaries)}")
 
-    with open('results_llama_7n_cnndm', 'w') as f:
+    with open('results_llama_7n_cnndm_1000개_2', 'w') as f:
         f.writelines(summaries)
     print('write data')
     references = test_sampled['highlights']
     print('compute results..')
-    metric.compute(predictions=summaries, references=references)
+    print(metric.compute(predictions=summaries, references=references))
 
     print('끝')
 if __name__=='__main__':
