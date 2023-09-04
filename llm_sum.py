@@ -29,34 +29,29 @@ def parse_args():
     parser.add_argument(
         '--model',
         type=str,
-        required=False,
-        default='meta-llama/Llama-2-7b-hf',
+        required=True,
         help='Summarization Model name'
     )
     parser.add_argument(
         '--flair',
-        type=bool,
-        required=False,
-        default=False,
+        action='store_true',
         help='Add Flair model'
     )
     parser.add_argument(
         '--dataset',
         type=str,
-        required=False,
+        required=True,
         default='cnn_dailymail',
         help='Summarization dataset'
     )
     parser.add_argument(
         '--do_train',
-        type=str,
-        required=True,
+        action='store_true',
         help='Train model'
     )
     parser.add_argument(
         '--do_test',
-        type=str,
-        required=True,
+        action='store_true',
         help='Test model'
     )
     parser.add_argument(
@@ -94,29 +89,25 @@ def parse_args():
         help='How much data to test'
     )
     parser.add_argument(
-        '--ouput_model_dir',
+        '--output_model_dir',
         type=str,
         required=True,
         help='The name of trained model'
     )
     parser.add_argument(
         '--save_summary',
-        type=bool,
-        required=False,
-        default=False
+        action='store_true',
         help='Whether save summary or not'
     )
     parser.add_argument(
-        '--ouput_summary_dir',
+        '--output_summary_dir',
         type=str,
         required=True,
         help='Directory of generated summaries'
     )
     parser.add_argument(
         '--push_to_hub',
-        type=bool,
-        required=False,
-        default=False,
+        action='store_true',
         help='Push the trained model on huggingface or not'
     )
     parser.add_argument(
@@ -144,11 +135,13 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"{model_ckpt} is running on {device}..\n")
-
+    print('load dataset..')
     if args.dataset == 'cnn_dailymail':
         dataset = load_dataset(args.dataset, version='3.0.0')
-        train_dataset = get_preprocessed_dataset(cnn_dm_dataset, dataset, 'train')
-        test_sampled = dataset["test"].shuffle(seed=42).select(args.test_len)
+        if args.model == 'meta-llama/Llama-2-7b-hf':
+            tokenizer = LlamaTokenizer.from_pretrained(model_ckpt)
+        train_dataset = get_preprocessed_dataset(tokenizer, cnn_dm_dataset, 'train')
+        test_sampled = dataset["test"].shuffle(seed=42).select(range(args.test_length))
     if args.dataset == 'element_aware':
         with open('./ft_datasets/cnndm_element_aware.json') as f:
             dataset = json.load(f)
@@ -157,7 +150,7 @@ def main():
         for i in dataset['cnn_dm']:
             articles.append(i['src'])
             references.append(i['element-aware_summary'])
-
+    print('done..')
     def create_peft_config(model):
         from peft import (
             get_peft_model,
@@ -179,8 +172,11 @@ def main():
         model = prepare_model_for_int8_training(model)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
-        return model, peft_config      
+        return model, peft_config 
     
+    print(args)
+    if args.do_train :
+        print('train model.2.')
     if args.model == 'meta-llama/Llama-2-7b-hf':
         model =LlamaForCausalLM.from_pretrained(model_ckpt, load_in_8bit=True, device_map='auto', torch_dtype=torch.float16)
         tokenizer = LlamaTokenizer.from_pretrained(model_ckpt)
@@ -189,11 +185,11 @@ def main():
                 "pad_token": "<PAD>",
             }
         )
-        if args.do_train == True:
+        if args.do_train:
             model.train()
             model, lora_config = create_peft_config(model)
 
-            output_dir = args.output_model_dir
+            output_dir = f'{args.output_model_dir}/epoch{args.epoch}_batch{args.train_batch_size}'
             training_args = TrainingArguments(
                 output_dir=output_dir,
                 overwrite_output_dir=True,
@@ -216,11 +212,12 @@ def main():
                 data_collator=default_data_collator,
             )
             trainer.train()
-
+            print('done')
             if args.push_to_hub == True:
                 trainer.push_to_hub()
+                print('push model to hub')
 
-        if args.do_test == True:
+        if args.do_test:
             prompt = '\n\nSummarize the above article:\n'
             full_text_sampled = []
             for i in test_sampled['article']:
@@ -290,12 +287,12 @@ def main():
             return {"input_ids": input_encodings["input_ids"],
                     "attention_mask": input_encodings["attention_mask"],
                     "labels": target_encodings["input_ids"]}
-        
+        print('load dataset..')
         dataset_pt = dataset.map(convert_examples_to_features, batched=True)
         columns = ["input_ids", "labels", "attention_mask"]
         dataset_pt.set_format(type="torch", columns=columns)
-
-        if args.do_train == True:
+        print('done..')
+        if args.do_train:
             seq2seq_data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
             training_args = TrainingArguments(
@@ -319,19 +316,20 @@ def main():
                         data_collator=seq2seq_data_collator,
                         train_dataset=dataset_pt['train'],
                         eval_dataset=dataset_pt['validation'])
-
+            print('train model..1')
             trainer.train()
-
+            print('done')
             if args.push_to_hub == True:
                 trainer.push_to_hub()
-        if args.do_test == True:
+                print('push model to hub')
+        if args.do_test:
             score = evaluate_summary(test_sampled, metric, trainer.model, tokenizer, batch_size=2, column_text="article", column_summary="highlights")
             results = trainer.evaluate()
             print(f'result: {results}')
             print(f'score: {score}')
 
     if args.model == 'gpt-4':
-        if args.do_test == True:
+        if args.do_test:
             openai.api_key = args.openai_API_key
             summarization_prompt = "\nSummarize the above article:\n"
             system_prompt = "You are expert at summarizing, and you are going to summarize some articles"
@@ -360,7 +358,7 @@ def main():
         print(metric.compute(predictions=chat_predictions, references=test_sampled[:len(chat_predictions)]['highlights']))
 
     
-    if args.do_test == True:
+    if args.do_test:
         nltk.download('punkt')
         task = 'summarization'
 
@@ -375,7 +373,7 @@ def main():
 
 
     if args.save_summary == True:
-        with open(args.output_summary_dir, 'w') as f:
+        with open(f'{args.output_summary_dir}/{args.model}_epoch{args.epoch}_len{args.test_length}' 'w') as f:
             f.writelines(summaries)
 
     end = time.time()  
