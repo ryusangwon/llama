@@ -159,7 +159,7 @@ def main():
         dataset = load_dataset(args.dataset, version='3.0.0')
         if args.model == 'meta-llama/Llama-2-7b-hf':
             tokenizer = LlamaTokenizer.from_pretrained(model_ckpt)
-        train_dataset = get_preprocessed_dataset(tokenizer, cnn_dm_dataset, 'train', 10000)
+        train_dataset = get_preprocessed_dataset(tokenizer, cnn_dm_dataset, 'train')
         test_sampled = dataset["test"].shuffle(seed=42).select(range(args.test_size))
         references = test_sampled['highlights']
         articles = test_sampled['article']
