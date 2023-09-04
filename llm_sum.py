@@ -3,6 +3,7 @@ import torch.nn as nn
 
 from transformers import LlamaForCausalLM, LlamaTokenizer, AutoModelForSeq2SeqLM, AutoTokenizer
 from transformers import default_data_collator, Trainer, TrainingArguments, DataCollatorForSeq2Seq
+from peft import PeftModel, PeftConfig
 import evaluate
 from datasets import load_dataset
 
@@ -31,6 +32,16 @@ def parse_args():
         type=str,
         required=True,
         help='Summarization Model name'
+    )
+    parser.add_argument(
+        '--do_peft_test',
+        action='store_true',
+        help='Summarization PEFT Model name'
+    )
+    parser.add_argument(
+        '--peft_model',
+        type=str,
+        help='Summarization PEFT Model name'
     )
     parser.add_argument(
         '--flair',
@@ -135,6 +146,7 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"{model_ckpt} is running on {device}..\n")
+
     print('load dataset..')
     if args.dataset == 'cnn_dailymail':
         dataset = load_dataset(args.dataset, version='3.0.0')
@@ -151,6 +163,14 @@ def main():
             articles.append(i['src'])
             references.append(i['element-aware_summary'])
     print('done..')
+
+    if args.do_test:
+        if args.do_peft_test:
+            peft_model_id = args.peft_model
+            config = PeftConfig.from_pretrained(peft_model_id)
+            model = LlamaForCausalLM.from_pretrained(config.base_model_name_or_path, return_dict=True, load_in_8bit=True, device_map='auto')
+            tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
+
     def create_peft_config(model):
         from peft import (
             get_peft_model,
@@ -175,7 +195,7 @@ def main():
         return model, peft_config 
     
     print(args)
-    if args.do_train :
+    if args.do_train:
         print('train model.2.')
     if args.model == 'meta-llama/Llama-2-7b-hf':
         model =LlamaForCausalLM.from_pretrained(model_ckpt, load_in_8bit=True, device_map='auto', torch_dtype=torch.float16)
@@ -235,7 +255,6 @@ def main():
             input_ids_sampled = tokenized_article_sampled.with_format('torch')['input_ids']
             attention_mask_sampled = tokenized_article_sampled.with_format('torch')['attention_mask']
 
-
             print('start make summaries..')
             summaries = []
             for i in range(len(tokenized_article_sampled)):
@@ -245,7 +264,7 @@ def main():
                     predictions = predictions_all.split(prompt)[1]
                     print(f'{i}th summary:')
                     print(predictions)
-                    predictions = [p.replace('\n', '/') for p in predictions]
+                    # predictions = [p.replace('\n', '/') for p in predictions]
                     print('\n')
                     summaries.append(predictions)
             references = test_sampled['highlights']
