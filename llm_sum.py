@@ -96,13 +96,13 @@ def parse_args():
     parser.add_argument(
         '--train_size',
         type=int,
-        required=True,
+        required=False,
         help='How much data to test'
     )
     parser.add_argument(
         '--test_size',
         type=int,
-        required=True,
+        required=False,
         help='How much data to test'
     )
     parser.add_argument(
