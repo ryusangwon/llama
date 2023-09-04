@@ -94,7 +94,13 @@ def parse_args():
         help='Saving steps'
     )
     parser.add_argument(
-        '--test_length',
+        '--train_size',
+        type=int,
+        required=True,
+        help='How much data to test'
+    )
+    parser.add_argument(
+        '--test_size',
         type=int,
         required=True,
         help='How much data to test'
@@ -148,12 +154,16 @@ def main():
     print(f"{model_ckpt} is running on {device}..\n")
 
     print('load dataset..')
+
     if args.dataset == 'cnn_dailymail':
         dataset = load_dataset(args.dataset, version='3.0.0')
         if args.model == 'meta-llama/Llama-2-7b-hf':
             tokenizer = LlamaTokenizer.from_pretrained(model_ckpt)
-        train_dataset = get_preprocessed_dataset(tokenizer, cnn_dm_dataset, 'train')
-        test_sampled = dataset["test"].shuffle(seed=42).select(range(args.test_length))
+        train_dataset = get_preprocessed_dataset(tokenizer, cnn_dm_dataset, 'train', 10000)
+        test_sampled = dataset["test"].shuffle(seed=42).select(range(args.test_size))
+        references = test_sampled['highlights']
+        articles = test_sampled['article']
+
     if args.dataset == 'element_aware':
         with open('./ft_datasets/cnndm_element_aware.json') as f:
             dataset = json.load(f)
@@ -188,13 +198,13 @@ def main():
             target_modules = ["q_proj", "v_proj"]
         )
 
-        # prepare int-8 model for training
         model = prepare_model_for_int8_training(model)
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
         return model, peft_config 
     
     print(args)
+
     if args.do_train:
         print('train model.2.')
     if args.model == 'meta-llama/Llama-2-7b-hf':
@@ -264,11 +274,12 @@ def main():
                     predictions = predictions_all.split(prompt)[1]
                     print(f'{i}th summary:')
                     print(predictions)
-                    # predictions = [p.replace('\n', '/') for p in predictions]
+                    # predictions = [p.replace('\n', ' ') for p in predictions]
                     print('\n')
                     summaries.append(predictions)
-            references = test_sampled['highlights']
             metric = evaluate.load('rouge', use_aggregator=False)
+            print(len(summaries))
+            print(len(references))
             print(metric.compute(predictions=summaries, references=references))
 
     if args.model == 'facebook/bart-base':
@@ -381,18 +392,16 @@ def main():
         nltk.download('punkt')
         task = 'summarization'
 
-        # Prepare data for pre-trained evaluators
         data = convert_to_json(output_list=summaries, 
                         src_list=articles, ref_list=references)
-        # Initialize evaluator for a specific task
         evaluator = get_evaluator(task)
-        # Get multi-dimensional evaluation scores
         eval_scores = evaluator.evaluate(data, print_result=True)
         print('eval score:', eval_scores)
 
-
+    # summaries_clean = [s.replace('\n', ' ') for s in summaries]
+    # [print(s) for s in summaries]
     if args.save_summary == True:
-        with open(f'{args.output_summary_dir}/{args.model}_epoch{args.epoch}_len{args.test_length}' 'w') as f:
+        with open(f'{args.output_summary_dir}{args.model}_epoch{args.epoch}_len{args.test_size}', 'w') as f:
             f.writelines(summaries)
 
     end = time.time()  
