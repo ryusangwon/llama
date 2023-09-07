@@ -139,6 +139,11 @@ def parse_args():
         required=False,
         help='openAI API key'
     )
+    parser.add_argument(
+        '--num',
+        type=int,
+        help='Number for different summary file'
+    )
     args = parser.parse_args()
     return args
 
@@ -151,6 +156,7 @@ def main():
     model_ckpt = args.model
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    metric = evaluate.load('rouge', use_aggregator=False)
     print(f"{model_ckpt} is running on {device}..\n")
 
     print('load dataset..')
@@ -159,7 +165,10 @@ def main():
         dataset = load_dataset(args.dataset, version='3.0.0')
         if args.model == 'meta-llama/Llama-2-7b-hf':
             tokenizer = LlamaTokenizer.from_pretrained(model_ckpt)
-        train_dataset = get_preprocessed_dataset(tokenizer, cnn_dm_dataset, 'train')
+        if 'llama' in args.model:
+            train_dataset = get_preprocessed_dataset(tokenizer, cnn_dm_dataset, 'train')
+        else:
+            train_dataset = dataset['train']
         test_sampled = dataset["test"].shuffle(seed=42).select(range(args.test_size))
         references = test_sampled['highlights']
         articles = test_sampled['article']
@@ -205,8 +214,6 @@ def main():
     
     print(args)
 
-    if args.do_train:
-        print('train model.2.')
     if args.model == 'meta-llama/Llama-2-7b-hf':
         model =LlamaForCausalLM.from_pretrained(model_ckpt, load_in_8bit=True, device_map='auto', torch_dtype=torch.float16)
         tokenizer = LlamaTokenizer.from_pretrained(model_ckpt)
@@ -248,10 +255,11 @@ def main():
                 print('push model to hub')
 
         if args.do_test:
-            prompt = '\n\nSummarize the above article:\n'
+            prompt = '\n\nSummarize the above article in 5 sentences:\n'
+            print('prompt: ', prompt)
             full_text_sampled = []
             for i in test_sampled['article']:
-                full_text_sampled.append('Article:\n' + i + prompt)
+                full_text_sampled.append('article:\n' + i + prompt)
             print('make full data')
             article_sampled = Dataset.from_pandas(pd.DataFrame(data=full_text_sampled, columns=['article']))
                 
@@ -277,37 +285,44 @@ def main():
                     # predictions = [p.replace('\n', ' ') for p in predictions]
                     print('\n')
                     summaries.append(predictions)
-            metric = evaluate.load('rouge', use_aggregator=False)
             print(len(summaries))
             print(len(references))
             print(metric.compute(predictions=summaries, references=references))
 
-    if args.model == 'facebook/bart-base':
+    if 'bart' in args.model:
         tokenizer = AutoTokenizer.from_pretrained(model_ckpt)
         model = AutoModelForSeq2SeqLM.from_pretrained(model_ckpt).to(device)
+
+        output_summary = []
 
         def chunks(list_of_elements, batch_size):
             for i in range(0, len(list_of_elements), batch_size):
                 yield list_of_elements[i: i+batch_size]
         
-        def evaluate_summary(dataset, metric, model, tokenizer, batch_size=16, device=device, column_text="article", column_summary="highlights"):
+        def evaluate_summary(dataset, metric, model, tokenizer,
+                        batch_size=16, device=device,
+                        column_text="article",
+                        column_summary="highlights"):
             article_batches = list(chunks(dataset[column_text], batch_size))
             target_batches = list(chunks(dataset[column_summary], batch_size))
-
+            
             for article_batch, target_batch in tqdm(zip(article_batches, target_batches), total=len(article_batches)):
                 inputs = tokenizer(article_batch, max_length=1024, truncation=True,
                                 padding="max_length", return_tensors="pt")
                 summaries = model.generate(input_ids=inputs["input_ids"].to(device), # module을 추가하면 dataparallel문제 해결
                                         attention_mask=inputs["attention_mask"].to(device),
-                                        length_penalty=0.8, num_beams=8, max_length=128)
+                                        length_penalty=0.8, num_beams=5, max_length=128)
                 decoded_summaries = [tokenizer.decode(s, skip_special_tokens=True,
                                                     clean_up_tokenization_spaces=True) for s in summaries]
                 decoded_summaries = [d.replace("<n>", " ") for d in decoded_summaries]
+                # print(decoded_summaries)
                 print(decoded_summaries)
+                output_summary.append(decoded_summaries)
                 metric.add_batch(predictions=decoded_summaries, references=target_batch)
 
             score = metric.compute()
             return score
+
 
         def convert_examples_to_features(example_batch):
             tokenizer = AutoTokenizer.from_pretrained(model_ckpt)
@@ -321,8 +336,10 @@ def main():
         dataset_pt = dataset.map(convert_examples_to_features, batched=True)
         columns = ["input_ids", "labels", "attention_mask"]
         dataset_pt.set_format(type="torch", columns=columns)
+
         print('done..')
         if args.do_train:
+            print('train bart..')
             seq2seq_data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
             training_args = TrainingArguments(
@@ -346,22 +363,24 @@ def main():
                         data_collator=seq2seq_data_collator,
                         train_dataset=dataset_pt['train'],
                         eval_dataset=dataset_pt['validation'])
-            print('train model..1')
             trainer.train()
             print('done')
             if args.push_to_hub == True:
                 trainer.push_to_hub()
                 print('push model to hub')
         if args.do_test:
-            score = evaluate_summary(test_sampled, metric, trainer.model, tokenizer, batch_size=2, column_text="article", column_summary="highlights")
-            results = trainer.evaluate()
-            print(f'result: {results}')
+            score = evaluate_summary(test_sampled, metric, model, tokenizer, batch_size=1, column_text="article", column_summary="highlights")
+            summaries = []
+            for i in output_summary:
+                summaries.append(i[0])
+            # results = model.evaluate()
+            # print(f'result: {results}')
             print(f'score: {score}')
 
     if args.model == 'gpt-4':
         if args.do_test:
             openai.api_key = args.openai_API_key
-            summarization_prompt = "\nSummarize the above article:\n"
+            summarization_prompt = "\nSummarize the above article in 3 sentences:\n"
             system_prompt = "You are expert at summarizing, and you are going to summarize some articles"
 
             chat_response = []
@@ -391,17 +410,18 @@ def main():
     if args.do_test:
         nltk.download('punkt')
         task = 'summarization'
-
         data = convert_to_json(output_list=summaries, 
                         src_list=articles, ref_list=references)
         evaluator = get_evaluator(task)
         eval_scores = evaluator.evaluate(data, print_result=True)
-        print('eval score:', eval_scores)
+        # print('eval score:', eval_scores)
 
     # summaries_clean = [s.replace('\n', ' ') for s in summaries]
     # [print(s) for s in summaries]
+    # with open('test12123.txt', 'w') as f:
+    #         f.writelines(summaries)
     if args.save_summary == True:
-        with open(f'{args.output_summary_dir}{args.model}_epoch{args.epoch}_len{args.test_size}', 'w') as f:
+        with open(f'{args.output_summary_dir}_{args.model}_epoch{args.epoch}_len{args.test_size}_{args.num}', 'w') as f:
             f.writelines(summaries)
 
     end = time.time()  

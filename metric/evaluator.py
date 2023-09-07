@@ -43,7 +43,6 @@ class SumEvaluator:
             if dim == 'consistency' or dim == 'fluency':
                 src_list, output_list = [], []
                 n_sents = [] # the number of sentences in each generated summary
-                print(f'n_sent: {n_sents}')
                 for i in range(n_data):
                     source = data[i]['source']
                     system_outputs = sent_tokenize(data[i]['system_output'])
@@ -58,8 +57,12 @@ class SumEvaluator:
                 # Get average score for each sample
                 start_idx = 0
                 score = []
+                
                 for cur_n_sent in n_sents:
-                    score.append(sum(sent_score[start_idx: start_idx + cur_n_sent]) / cur_n_sent)
+                    if cur_n_sent != 0:
+                        score.append(sum(sent_score[start_idx: start_idx + cur_n_sent]) / cur_n_sent)
+                    else:
+                        score.append(0)
                     start_idx += cur_n_sent
             
             # Calculate summary-level score for 'coherence' and 'relevance'

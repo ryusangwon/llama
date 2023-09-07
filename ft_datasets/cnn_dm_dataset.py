@@ -7,7 +7,8 @@ import datasets
 from .utils import Concatenator
 
 def get_preprocessed_cnn_dm(dataset_config, tokenizer, split):
-    dataset = datasets.load_dataset("cnn_dailymail", version='3.0.0', split=split)
+    # dataset = datasets.load_dataset("cnn_dailymail", version='3.0.0', split=split)
+    dataset = datasets.load_dataset("cnn_dailymail", version='3.0.0', split=split).shuffle(seed=42).select(range(10000))
 
     prompt = (
         f"{{article}}\nSummarize this article:\n{{highlights}}{{eos_token}}"
